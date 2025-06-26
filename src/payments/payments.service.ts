@@ -6,10 +6,10 @@ import { Request, Response } from 'express';
 
 @Injectable()
 export class PaymentsService {
-  private readonly stripe = new Stripe(envs.stripe_secret);
+  private readonly stripe = new Stripe(envs.stripeSecret);
 
   async createPaymemtSession(paymentSessionDto: PaymentSessionDto) {
-    const { currency, items } = paymentSessionDto;
+    const { currency, items, orderId } = paymentSessionDto;
 
     const line_items = items.map((item) => {
       return {
@@ -27,12 +27,14 @@ export class PaymentsService {
     const session = await this.stripe.checkout.sessions.create({
       //Colocar ID de la orden
       payment_intent_data: {
-        metadata: {},
+        metadata: {
+          orderId,
+        },
       },
       line_items,
       mode: 'payment',
-      success_url: 'http://localhost:3003/payments/success',
-      cancel_url: 'http://localhost:3003/payments/canceled',
+      success_url: envs.stripeSuccessUrl,
+      cancel_url: envs.stripeCancelUrl,
     });
 
     return session;
@@ -41,7 +43,34 @@ export class PaymentsService {
   async stripeWebhook(req: Request, res: Response) {
     const sig = req.headers['stripe-signature'];
 
-    console.log(sig);
+    let event: Stripe.Event;
+
+    const endpointSecret = envs.stripeEndpointSecret;
+
+    try {
+      event = this.stripe.webhooks.constructEvent(
+        req['rawBody'],
+        sig,
+        endpointSecret,
+      );
+    } catch (err) {
+      return res.sendStatus(400);
+    }
+
+    switch (event.type) {
+      case 'charge.succeeded':
+        const chargeSucceded = event.data.object;
+        //TODO: LLamar a nuestro MS
+        console.log({
+          metadata: chargeSucceded.metadata,
+          orderId: chargeSucceded.metadata.orderId,
+        });
+
+        break;
+
+      default:
+        console.log(`Event not handled: ${event.type}`);
+    }
 
     return res.status(200).json({ sig });
   }
